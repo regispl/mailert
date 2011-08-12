@@ -1,19 +1,21 @@
 import smtplib
 
+from email.MIMEText import MIMEText
 from pprint import pprint
-
-MISSING_PARAMETER_INFO = 'Parameter %s is missing!'
-WRONG_FORMAT_INFO = 'Connection string should look like: user:password@host[:port].'
-
-OBLIGATORY_PARAMETERS = ['host', 'user', 'password', 'service', 'receivers']
 
 class MailertException(Exception): pass
 class RequiredParameterMissingException(MailertException): pass
 class InvalidConnectionStringFormat(MailertException): pass
 
 class Mailert(object):
-	
-	title_format = '[%(level)s] %(service)s - %(title)s'
+
+	# If one of them is missing in constructor an exception will be raised
+	OBLIGATORY_PARAMETERS = ['host', 'user', 'password', 'service', 'receivers']
+
+	MISSING_PARAMETER_INFO = 'Parameter %s is missing!'
+	WRONG_FORMAT_INFO = 'Connection string should look like: user:password@host[:port].'
+
+	subject_format = '[%(level)s] %(service)s - %(subject)s'
 
 	conn = None
 	config = dict()
@@ -22,22 +24,28 @@ class Mailert(object):
 		"""
 		Mailert initialization. Available options:
 		
-		host
-		port
-		ssl
-		timeout
-		user
-		password
-		service
-		sender
-		receivers
-		connstr
-
+		host 		- SMTP host,
+		port 		- SMTP port (optional),
+		ssl 		- Use SSL (True/False),
+		timeout 	- SMTP timeout (optional),
+		user 		- SMTP user,
+		password 	- SMTP password,
+		keep_alive 	- Decides if connection should be closed after sending an 
+						e-mail or not (optional; default True, requires closing 
+						the connection manually),
+		service 	- Name of the monitored service - it will be displayed in 
+						title of the mail,
+		sender 		- Common name of the mail sender (optional; if empty, 'user' 
+						field will be used),
+		receivers  	- List of alert receivers,
+		connstr 	- Connection string for easier parameter passing. Format: 
+						user:password@host[:port]. IMPORTANT! None of the fields 
+						can contain '@' and ':'. Hopefully it will be fixed 
+						someday to allow logins with '@'.
 		"""
 
 		args = kwargs.copy()
 
-		# TODO: Handle logins with '@'
 		if 'connstr' in args:
 			connstr = args['connstr']
 			if '@' in connstr:
@@ -45,7 +53,7 @@ class Mailert(object):
 				if ':' in user_password:
 					args['user'], args['password'] = user_password.split(':')
 				else:
-					raise InvalidConnectionStringFormat, WRONG_FORMAT_INFO
+					raise InvalidConnectionStringFormat, self.WRONG_FORMAT_INFO
 				if ':' in host_port:
 					host, port = host_port.split(':')
 				else:
@@ -53,9 +61,9 @@ class Mailert(object):
 					port = None
 				args['host'], args['port'] = host, port
 			else:
-				raise InvalidConnectionStringFormat, WRONG_FORMAT_INFO
+				raise InvalidConnectionStringFormat, self.WRONG_FORMAT_INFO
 
-		self.__check_if_parameters_are_missing(args)
+		self._check_if_parameters_are_missing(args)
 
 		self.config['host'] = args['host']
 		self.config['user'] = args['user']
@@ -72,57 +80,74 @@ class Mailert(object):
 		if 'timeout' in args:
 			self.config['timeout'] = args['timeout'] 
 
+		self.config['keep_alive'] = True
+		if 'keep_alive' in args:
+			self.config['keep_alive'] = args['keep_alive'] 
+
 		if 'sender' in args:
 			self.config['sender'] = args['sender'] 
 
-		return True
+	def __del__(self):
+		if self.conn is not None:
+			self.conn.quit()
 
-	def __check_if_parameters_are_missing(self, params):
-		for key in OBLIGATORY_PARAMETERS:
+	def _check_if_parameters_are_missing(self, params):
+		for key in self.OBLIGATORY_PARAMETERS:
 			if key not in params:
-				raise RequiredParameterMissingException(MISSING_PARAMETER_INFO % key)
+				raise RequiredParameterMissingException, self.MISSING_PARAMETER_INFO % key
 
-	def debug(self, title, body):
-		return self._send_alert('debug', title, body)
-
-	def info(self, title, body):
-		return self._send_alert('info', title, body)
-
-	def warning(self, title, body):
-		return self._send_alert('warning', title, body)
-
-	def error(self, title, body):
-		return self._send_alert('info', title, body)
-
-	def critical(self, title, body):
-		return self._send_alert('error', title, body)
-
-	def panic(self, title, body):
-		return self._send_alert('panic', title, body)
-
-	def _send_alert(self, loglevel, title, body, **kwargs):
+	def _send_alert(self, loglevel, subject, body, **kwargs):
 		c = self.config
 
-		self.__check_if_parameters_are_missing(c)
-
-		pprint(c)
-
 		if not self.conn:
-			constructor = smtplib.SMTP if c.get('ssl', None) is None else smtplib.SMTP_SSL
-			self.conn = constructor(c.get('host', ''), c.get('port', None))
-			self.conn.login(c.get('user', ''), c.get('password', ''))
+			constructor = smtplib.SMTP if c.get('ssl', None) in [None, False] else smtplib.SMTP_SSL
+			self.conn = constructor(c['host'], c['port'])
+			self.conn.login(c['user'], c['password'])
 
 		data = dict()
 		data['level'] = loglevel.upper()
 		data['service'] = c.get('service')
-		data['title'] = title
-		
-		title = self.title_format % data
-		body = body
-		
-		print title
-		print body
+		data['subject'] = subject
 
-		# TODO
-		return True
+		mail_receivers = c['receivers']
+		mail_from = '%s <%s>' % (c['sender'], c['user']) if 'sender' in c else c['user']		
+		mail_subject = self.subject_format % data
+		mail_body = body
 
+		message = MIMEText(mail_body, 'plain')
+		message['From'] = mail_from
+		message['Subject'] = mail_subject
+
+		pprint(message)
+
+		result = self.conn.sendmail(mail_from, mail_receivers, message.as_string())
+
+		if not self.config['keep_alive']:
+			self.conn.quit()
+			self.conn = None
+
+		return True if len(result) == 0 else False 
+
+	def set_subject_format(self, format):
+		self.subject_format = format
+
+	def debug(self, subject, body):
+		return self._send_alert('debug', subject, body)
+
+	def info(self, subject, body):
+		return self._send_alert('info', subject, body)
+
+	def warning(self, subject, body):
+		return self._send_alert('warning', subject, body)
+
+	def error(self, subject, body):
+		return self._send_alert('info', subject, body)
+
+	def critical(self, subject, body):
+		return self._send_alert('error', subject, body)
+
+	def panic(self, subject, body):
+		return self._send_alert('panic', subject, body)
+
+	def omfg(self, subject, body):
+		return self._send_alert('omfg', 'We are all going to die!!!' + subject, body)
