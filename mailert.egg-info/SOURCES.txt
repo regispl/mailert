@@ -1,0 +1,6 @@
+README
+setup.py
+mailert.egg-info/PKG-INFO
+mailert.egg-info/SOURCES.txt
+mailert.egg-info/dependency_links.txt
+mailert.egg-info/top_level.txt
