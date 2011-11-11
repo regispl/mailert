@@ -1,6 +1,9 @@
 README
 setup.py
+mailert/__init__.py
+mailert/mailert.py
 mailert.egg-info/PKG-INFO
 mailert.egg-info/SOURCES.txt
 mailert.egg-info/dependency_links.txt
+mailert.egg-info/requires.txt
 mailert.egg-info/top_level.txt

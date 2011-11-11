@@ -1,7 +1,5 @@
 import smtplib
-
 from email.MIMEText import MIMEText
-from pprint import pprint
 
 class MailertException(Exception): pass
 class RequiredParameterMissingException(MailertException): pass
@@ -21,8 +19,7 @@ class Mailert(object):
 	config = dict()
 
 	def __init__(self, **kwargs):
-		"""
-		Mailert initialization. Available options:
+		"""Mailert initialization. Available options:
 		
 		host 		- SMTP host,
 		port 		- SMTP port (optional),
@@ -99,10 +96,7 @@ class Mailert(object):
 	def _send_alert(self, loglevel, subject, body, **kwargs):
 		c = self.config
 
-		if not self.conn:
-			constructor = smtplib.SMTP if c.get('ssl', None) in [None, False] else smtplib.SMTP_SSL
-			self.conn = constructor(c['host'], c['port'])
-			self.conn.login(c['user'], c['password'])
+		self.connect()
 
 		data = dict()
 		data['level'] = loglevel.upper()
@@ -117,16 +111,28 @@ class Mailert(object):
 		message = MIMEText(mail_body, 'plain')
 		message['From'] = mail_from
 		message['Subject'] = mail_subject
-
-		pprint(message)
+		message.set_charset('utf-8')
 
 		result = self.conn.sendmail(mail_from, mail_receivers, message.as_string())
 
-		if not self.config['keep_alive']:
-			self.conn.quit()
-			self.conn = None
+		if not c['keep_alive']:
+			self.quit()
 
 		return True if len(result) == 0 else False 
+
+	def connect(self):
+		c = self.config
+		if not self.conn:
+			constructor = smtplib.SMTP if c.get('ssl', None) in [None, False] else smtplib.SMTP_SSL
+			timeout = c.get('timeout', None)
+			self.conn = constructor(c['host'], c['port'], timeout = timeout)
+			self.conn.login(c['user'], c['password'])
+		return True
+
+	def quit(self):
+		result = self.conn.quit()
+		self.conn = None
+		return result
 
 	def set_subject_format(self, format):
 		self.subject_format = format
